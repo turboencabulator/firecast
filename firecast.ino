@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <LiquidCrystal.h>
+
 /*
  * Commands from the head unit (or best guesses as to their meaning):
  * Lower 8 bits of 0x73 signify a command to the cassette deck.
@@ -115,6 +117,10 @@ public:
 	uint32_t getData() const
 	{
 		return data;
+	}
+	int getLen() const
+	{
+		return nbits;
 	}
 
 	/*
@@ -224,7 +230,7 @@ public:
  * non-inverting.  It must also let the bus float high instead of driving it
  * high, so that other devices can pull the bus low.
  */
-#define EC_UART  Serial
+#define EC_UART  Serial1
 #define EC_BAUD  10000
 #define EC_FRAME SERIAL_8N1
 
@@ -246,7 +252,7 @@ public:
  * gets moved to a FIFO, and we can check the FIFO depth.  Add some margin to
  * account for interrupt latency, but it should be less than the EC_IDLE time.
  */
-#define EC_SENSE 2     // digital interrupt-capable pin
+#define EC_SENSE 20    // digital interrupt-capable pin
 #define EC_BUSY  1500u // us; busy if ec_usec_since_fall is less than this
 volatile unsigned long last_fall;
 void ec_fall_isr()
@@ -270,18 +276,36 @@ ECFrame outframe;
 RingBuffer outqueue;
 uint32_t stat[2];
 
+/*
+ * define to try to interpret/display all known info.
+ * undef for debugging raw data, also sent out the Serial port.
+ */
+#undef FANCY_DISPLAY
+
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+#ifdef FANCY_DISPLAY
+uint8_t s_source;
+uint8_t s_amfm;
+uint16_t s_timeofday;
+uint16_t s_radiofreq;
+uint16_t s_tracknum;
+uint16_t s_tracktime;
+#endif
+
 void setup()
 {
 	stat[0] = STAT0 | STAT0_DOLBY_NR;
 	stat[1] = STAT1 | STAT1_UNLOADED;
 
-	// Insert tape.
-	stat[0] |=  (STAT0_TAPE_IN | STAT0_READY | STAT0_STOP);
-	stat[1] |=  (STAT1_TAPE_IN | STAT1_LOADED);
-	stat[1] &= ~(STAT1_UNLOADED);
-	outqueue.enqueue(stat[1]);
-	// This isn't immediately sent; the main loop waits for at least 1
-	// EC_IDLE period to ensure the bus is not busy.
+#ifdef FANCY_DISPLAY
+	lcd.begin(16, 2);
+	lcd.setCursor(0, 0);
+	lcd.print("Firecast");
+#else
+	lcd.begin(16, 1, LCD_5x10DOTS);
+	lcd.setCursor(16, 0);
+	lcd.autoscroll();
+#endif
 
 	// Start communicating.
 	last_fall = micros();
@@ -290,6 +314,7 @@ void setup()
 
 	EC_UART.begin(EC_BAUD, EC_FRAME);
 	EC_UART.setTimeout(EC_IDLE);
+	Serial.begin(115200);
 }
 
 void loop()
@@ -321,10 +346,12 @@ void loop()
 				// to that for the I2C bus (for example).
 				outframe = ECFrame();
 			} else if (outframe.isEmpty()) {
+#ifdef FANCY_DISPLAY
 				// Last bit of the TX frame was successfully
 				// RX'd; don't need to process it as an
 				// incoming RX frame from some other device.
 				inframe = ECFrame();
+#endif
 				outqueue.pop();
 				// Don't immediately reload the TXer, but
 				// begin a quiet time of at least 1 EC_IDLE
@@ -339,11 +366,25 @@ void loop()
 
 	// Should only get here when the bus is idle (no bits RX'd within the
 	// past EC_IDLE time).  Consider frames as complete and process them.
-	if (inframe.isValid()) {
+	int len = inframe.getLen();
+	uint32_t data = inframe.getData();
+	bool valid = inframe.isValid();
+#ifndef FANCY_DISPLAY
+	if (len >= 0) {
+		//if ((uint8_t)data != 0xc5) {
+			lcd.print(data, HEX);
+			lcd.print(valid ? '+' : '-');
+		//}
+		Serial.println(data, HEX);
+	}
+#else
+	bool update_time = false;
+	bool update_source = false;
+#endif
+	if (valid) {
 		// Process commands to the cassette deck.  An actual cassette
 		// deck appears to be more chatty, but my head unit is fine
 		// with this minimal amount of feedback.
-		uint32_t data = inframe.getData();
 		if (data == CMD_POLL) {
 			outqueue.enqueue(stat[1]);
 
@@ -390,6 +431,135 @@ void loop()
 		} else if (data == CMD_DOLBY_NR_0) {
 			stat[0] &= ~(STAT0_DOLBY_NR);
 
+#ifdef FANCY_DISPLAY
+		} else if (data == 0x03b3) {
+			s_source = 'R'; update_source = true;
+		} else if (data == 0x43b3) {
+			s_source = 'C'; update_source = true;
+		} else if (data == 0x83b3) {
+			s_source = 'T'; update_source = true;
+
+		} else if ((uint16_t)data == 0x0ec5) {  // nothing playing, clock
+			s_timeofday = (data >> 16) & 0x1fff; update_time = true;
+			s_source = ' '; update_source = true;
+		} else if ((uint16_t)data == 0x36c5) {  // tape playing, clock
+			s_timeofday = (data >> 16) & 0x1fff; update_time = true;
+		} else if ((uint16_t)data == 0x56c5) {  // cd playing, clock
+			s_timeofday = (data >> 16) & 0x1fff; update_time = true;
+		} else if ((uint16_t)data == 0x16c5) {  // radio on, clock
+			s_timeofday = (data >> 16) & 0x1fff; update_time = true;
+			s_amfm = data & 0x20000000 ? 'A' : 'F';
+		} else if ((uint16_t)data == 0x1ec5) {  // radio on, freq
+			s_radiofreq = (data >> 16) & 0x1fff; update_source = true;
+			s_amfm = data & 0x20000000 ? 'A' : 'F';
+		} else if ((uint16_t)data == 0x6ec5) {  // cd playing, track #
+			s_tracknum = (data >> 16) & 0x1fff; update_source = true;
+		} else if ((uint16_t)data == 0x86c5) {  // cd playing, track # (after pressing Seek/Prev/Next/Play)
+			s_tracknum = (data >> 16) & 0x1fff; update_source = true;
+		} else if ((uint16_t)data == 0x7ec5) {  // cd playing, track time
+			s_tracktime = (data >> 16) & 0x1fff; update_source = true;
+		} else if ((uint16_t)data == 0x76c5) {  // cd playing, track time (after pressing Seek/Prev/Next/Play)
+			s_tracktime = (data >> 16) & 0x1fff; update_source = true;
+		//} else if ((uint16_t)data == 0x4ec5) {  // disc error?
+		//} else if (data == 0x6c5) {  // display off
+		//	s_source = ' '; update_source = true;
+#endif
+		}
+	}
+
+#ifdef FANCY_DISPLAY
+	if (update_source) {
+		lcd.setCursor(0, 1);
+		if (s_source == 'T') {
+			lcd.write('C');
+			lcd.write('a');
+			lcd.write('s');
+			lcd.write('s');
+			lcd.write('e');
+			lcd.write('t');
+			lcd.write('t');
+			lcd.write('e');
+		} else if (s_source == 'R') {
+			if (s_amfm == 'A') {
+				uint8_t digit;
+				digit = ((s_radiofreq >> 12) & 0xf) + '0'; lcd.write(digit == '0' ? ' ' : digit);
+				digit = ((s_radiofreq >>  8) & 0xf) + '0'; lcd.write(digit);
+				digit = ((s_radiofreq >>  4) & 0xf) + '0'; lcd.write(digit);
+				digit = ((s_radiofreq      ) & 0xf) + '0'; lcd.write(digit);
+				lcd.write(' ');
+				lcd.write(' ');
+				lcd.write('A');
+				lcd.write('M');
+			} else /* if (s_amfm == 'F') */ {
+				uint8_t digit;
+				digit = ((s_radiofreq >> 12) & 0xf) + '0'; lcd.write(digit == '0' ? ' ' : digit);
+				digit = ((s_radiofreq >>  8) & 0xf) + '0'; lcd.write(digit);
+				digit = ((s_radiofreq >>  4) & 0xf) + '0'; lcd.write(digit);
+				lcd.write('.');
+				digit = ((s_radiofreq      ) & 0xf) + '0'; lcd.write(digit);
+				lcd.write(' ');
+				lcd.write('F');
+				lcd.write('M');
+			}
+		} else if (s_source == 'C') {
+			uint8_t digit;
+			lcd.write('C');
+			lcd.write('D');
+			lcd.write(' ');
+			digit = ((s_tracknum >>  4) & 0xf) + '0'; lcd.write(digit);
+			digit = ((s_tracknum      ) & 0xf) + '0'; lcd.write(digit);
+			lcd.write(' ');
+			lcd.write(' ');
+			lcd.write(' ');
+		} else /* if (s_source == ' ') */ {
+			lcd.write(' ');
+			lcd.write(' ');
+			lcd.write(' ');
+			lcd.write(' ');
+			lcd.write(' ');
+			lcd.write(' ');
+			lcd.write(' ');
+			lcd.write(' ');
+		}
+	}
+
+	if (update_time) {
+		uint8_t digit;
+		lcd.setCursor(11, 1);
+		digit = ((s_timeofday >> 12) & 0xf) + '0'; lcd.write(digit);
+		digit = ((s_timeofday >>  8) & 0xf) + '0'; lcd.write(digit);
+		lcd.write(':');
+		digit = ((s_timeofday >>  4) & 0xf) + '0'; lcd.write(digit);
+		digit = ((s_timeofday      ) & 0xf) + '0'; lcd.write(digit);
+	}
+#endif
+
+	int pressval = analogRead(0);
+	char press;
+	static char s_press;
+	if      (pressval >= 790) press = ' ';
+	else if (pressval >= 555) press = 'S';
+	else if (pressval >= 380) press = 'L';
+	else if (pressval >= 195) press = 'D';
+	else if (pressval >=  50) press = 'U';
+	else                      press = 'R';
+	if (s_press != press) {
+		s_press = press;
+		if (press == 'U') {
+			stat[0] |=  (STAT0_TAPE_IN | STAT0_READY | STAT0_STOP);
+			stat[1] |=  (STAT1_TAPE_IN | STAT1_LOADED);
+			stat[1] &= ~(STAT1_UNLOADED);
+			outqueue.enqueue(stat[1]);
+
+		} else if (press == 'D') {
+			stat[0] &= ~(STAT0_TAPE_IN | STAT0_READY | STAT0_STOP | STAT0_PLAY_F | STAT0_PLAY_R);
+			stat[1] &= ~(STAT1_TAPE_IN | STAT1_LOADED);
+			stat[1] |=  (STAT1_UNLOADED);
+			outqueue.enqueue(stat[1]);
+
+		} else if (press == 'S') {
+			stat[1] &= ~(STAT1_SEEK | STAT1_FAST_F | STAT1_FAST_R);
+			outqueue.enqueue(stat[1] | STAT1_FLIP);
 		}
 	}
 
