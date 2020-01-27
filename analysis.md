@@ -142,7 +142,7 @@ turned off in the 0x5c061 -> 0x4c061 transition.  This frame sequence is
 described as "Play to FM", so we can start making assumptions about the
 meaning of that bit.
 
-## Interpreting Terry's data
+## Terry's data
 
 ### First blog post
 
@@ -727,6 +727,79 @@ arm of the switch statement.
 
 ## Stuart's data
 
+Stuart has his info grouped by priority and address.  I've rearranged those
+groups to what I think the priority order should be (highest to lowest).
+Consider if two or more devices start transmitting at the same time.  The
+first one to transmit a '0' will lose arbitration, because someone else
+simultaneously transmitting a '1' will hold the bus low longer.  Note that all
+of the priority-2 data doesn't appear as important as the priority-1 data, and
+that everything at priority-3 is a command.
+
+	Commands from radio to OnStar
+	1 11 110011 00100110                 1 000064cf # 3-51-100  Is module present?
+	1 11 110011 11111110                 1 00007fcf # 3-51-127  SOURCE button was pressed during OnStar session
+
+	Command from IPM to radio
+	1 11 100111 0111010XX0               0 00002ee7 # 3-57-46/7-[XX]  Load personalization
+	                   ..                     XX    #   XX  memory number 1 or 2
+
+	Commands from radio
+	1 11 100101 11                       1 000003a7 # 3-41-3     Temperature button released
+	1 11 100101 1100000001               0 000203a7 # 3-41-3-2   Temperature down button pressed
+	1 11 100101 1001000001               0 000209a7 # 3-41-9-2   Eject CD changer magazine
+	1 11 100101 1100100001               1 000213a7 # 3-41-19-2  Temperature up button pressed
+
+	Commands to CD changer
+	1 11 011110 10                       1 0000017b # 3-30-1                   Forward or reverse scan button released
+	1 11 011110 1001                     0 0000097b # 3-30-9                   Request status, track, and minute
+	1 11 011110 100010                   0 0000117b # 3-30-17                  Stop (no magazine present)
+	1 11 011110 1000010010               1 0001217b # 3-30-33-1                Fast forward scan
+	1 11 011110 1001010010               0 0001297b # 3-30-41-1                Fast reverse scan
+	1 11 011110 10001100XXXXYYYY         1 0000317b # 3-30-49-[XXXXYYYY]       Load track
+	                    ....                  X     #   XXXX  BCD ones digit
+	                        ....             Y      #   YYYY  BCD tens digit
+	1 11 011110 101111                   1 00003d7b # 3-30-61                  Data received OK
+	1 11 011110 100000100XXXXYYYY0       0 0000417b # 3-30-65-0/1-[XXXXYYYY]   Seek to time, minutes part
+	                     ....                XX     #   XXXX  BCD ones digit
+	                         ....           YY      #   YYYY  BCD tens digit
+	1 11 011110 10111010XXXXXXXXXX       1 00005d7b # 3-30-93-[XXXXXXXXXX]     Random mode
+	                    ..........          XXX     #   XXXXXXXXXX  RNG seed (0 if random mode off)
+	1 11 011110 10001001                 1 0000917b # 3-30-145                 Stop playback
+	1 11 011110 10011001                 0 0000997b # 3-30-153                 Is module present?
+	1 11 011110 10011001111111           0 003f997b # 3-30-153-63              Upload disc data
+	1 11 011110 1000010110               0 0001a17b # 3-30-161-1               2× fast forward scan
+	1 11 011110 1001010110               1 0001a97b # 3-30-169-1               2× fast reverse scan
+	1 11 011110 10001101XXXXYYYY         0 0000b17b # 3-30-177-[XXXXYYYY]      Load track and seek to 0:00
+	                    ....                  X     #   XXXX  BCD ones digit
+	                        ....             Y      #   YYYY  BCD tens digit
+	1 11 011110 1001001101XXXXYYYY       1 0002c97b # 3-30-201-2/2-[XXXXYYYY]  Seek to time, seconds part
+	                      ....               XX     #   XXXX  BCD ones digit
+	                          ....          YY      #   YYYY  BCD tens digit
+	1 11 011110 100110110XXXXYYYY0       1 0000d97b # 3-30-217-0/1-[XXXXYYYY]  Load disc
+	                     ....                XX     #   XXXX  BCD ones digit
+	                         ....           YY      #   YYYY  BCD tens digit
+	1 11 011110 10111011XXXXXXXXXX       0 0000dd7b # 3-30-221-[XXXXXXXXXX]    Random mode
+	                    ..........          XXX     #   XXXXXXXXXX  RNG seed (0 if random mode off)
+
+	Commands to cassette
+	1 11 001110                          1 00000073 # 3-28-...  Future work: decoding from Terry Kolody's observations.
+
+	Commands from or to radio
+	1 11 001101 11                       1 000003b3 # 3-44-3    From radio: No auxiliary audio selected
+	1 11 001101 11000110                 1 000063b3 # 3-44-99   From radio: CD changer selected
+	1 11 001101 00011110                 1 000078b3 # 3-44-120  OnStar to radio: Disable recurring power status messages (keepalive pings)
+	1 11 001101 00111110                 0 00007cb3 # 3-44-124  OnStar to radio: Enable recurring power status messages (keepalive pings)
+	1 11 001101 11111110                 0 00007fb3 # 3-44-127  To radio: Send one power status message
+	1 11 001101 11000101                 1 0000a3b3 # 3-44-163  From radio: OnStar selected
+	1 11 001101 10000011                 0 0000c1b3 # 3-44-193  From radio: Cassette selected
+
+	Commands from OnStar to radio
+	1 11 001011 0110                     1 000006d3 # 3-52-6     Unmute OnStar audio
+	1 11 001011 0111010010               0 00012ed3 # 3-52-46-1  Call established and underway
+
+	Command to radio from OnStar
+	1 11 000101 11111110                 1 00007fa3 # 3-40-127  Acknowledge power status
+
 	Information from OnStar
 	1 10 110010 0110                     0 0000064d # 1-19-6     No session active
 	1 10 110010 0110000001               1 0002064d # 1-19-6-2   Status; radio mutes audio and enables controls
@@ -735,8 +808,14 @@ arm of the switch statement.
 	1 10 110010 001010                   0 0000144d # 1-19-20    Status; radio disables SOURCE button during OnStar session
 	1 10 110010 001010000001             1 0008144d # 1-19-20-8  Status; radio enables SOURCE button during OnStar session (see 3-51-127) 
 
-	Information from cassette player
-	1 10 000110                          1 00000061 # 1-24-...  Future work: decoding from Terry Kolody's observations.
+	Information from radio for IPM
+	1 10 100111 01100110                 1 000066e5 # 1-57-102        No personalization loaded
+	1 10 100111 0110010XX0               0 000026e5 # 1-57-38/7-[XX]  Loaded personalization
+	                   ..                     XX    #   XX  memory number 1 or 2
+
+	Information from radio
+	1 10 100101 01                       1 000002a5 # 1-41-2  OnStar audio mode active
+	1 10 100101 0110                     0 000006a5 # 1-41-6  OnStar audio mode inactive
 
 	Information from CD changer
 	1 10 010110 1000000ABCDEFGHI         1 00000169 # 1-26-1/7-[ABCDEFGHI]  Disc read status:
@@ -779,24 +858,18 @@ arm of the switch statement.
 	1 10 010110 1011100110XXXXXXXXXX     0 00019d69 # 1-26-29/7-3/3-[XXXXXXXXXX]  Random mode (response to 3-30-221-...)
 	                      ..........        XXX     #   XXXXXXXXXX  RNG seed (0 if random mode off)
 
+	Information from cassette player
+	1 10 000110                          1 00000061 # 1-24-...  Future work: decoding from Terry Kolody's observations.
+
 	Information from radio
 	1 10 000101 11111100XYZ0             1 00003fa1 # 1-40-63-[XYZ]  Power status
 	                    1                     1     #   X  audio system on
 	                     1                    2     #   Y  OnStar session active
 	                      1                   4     #   Z  vehicle accessory power on
 
-	Information from radio
-	1 10 100101 01                       1 000002a5 # 1-41-2  OnStar audio mode active
-	1 10 100101 0110                     0 000006a5 # 1-41-6  OnStar audio mode inactive
-
 	Information from radio in response to OnStar
 	1 10 000011 0110                     1 000006c1 # 1-48-6     OnStar audio enabled
 	1 10 000011 0111010010               0 00012ec1 # 1-48-46-1  Acknowledge OnStar call in progress
-
-	Information from radio for IPM
-	1 10 100111 01100110                 1 000066e5 # 1-57-102        No personalization loaded
-	1 10 100111 0110010XX0               0 000026e5 # 1-57-38/7-[XX]  Loaded personalization
-	                   ..                     XX    #   XX  memory number 1 or 2
 
 	Information from CD changer
 	1 01 010110 1001100XXXXYYY           1 0000196a # 2-26-25/7-[XXXXYYY]    Total disc time, frames part
@@ -831,68 +904,3 @@ arm of the switch statement.
 	              ......                       XX   #   XXXXXX  minutes (0-59)
 	                    .....                YY     #   YYYYY   hours (0-23)
 	                         ......         ZZ      #   ZZZZZZ  days (0-63)
-
-	Commands to cassette
-	1 11 001110                          1 00000073 # 3-28-...  Future work: decoding from Terry Kolody's observations.
-
-	Commands to CD changer
-	1 11 011110 10                       1 0000017b # 3-30-1                   Forward or reverse scan button released
-	1 11 011110 1001                     0 0000097b # 3-30-9                   Request status, track, and minute
-	1 11 011110 100010                   0 0000117b # 3-30-17                  Stop (no magazine present)
-	1 11 011110 1000010010               1 0001217b # 3-30-33-1                Fast forward scan
-	1 11 011110 1001010010               0 0001297b # 3-30-41-1                Fast reverse scan
-	1 11 011110 10001100XXXXYYYY         1 0000317b # 3-30-49-[XXXXYYYY]       Load track
-	                    ....                  X     #   XXXX  BCD ones digit
-	                        ....             Y      #   YYYY  BCD tens digit
-	1 11 011110 101111                   1 00003d7b # 3-30-61                  Data received OK
-	1 11 011110 100000100XXXXYYYY0       0 0000417b # 3-30-65-0/1-[XXXXYYYY]   Seek to time, minutes part
-	                     ....                XX     #   XXXX  BCD ones digit
-	                         ....           YY      #   YYYY  BCD tens digit
-	1 11 011110 10111010XXXXXXXXXX       1 00005d7b # 3-30-93-[XXXXXXXXXX]     Random mode
-	                    ..........          XXX     #   XXXXXXXXXX  RNG seed (0 if random mode off)
-	1 11 011110 10001001                 1 0000917b # 3-30-145                 Stop playback
-	1 11 011110 10011001                 0 0000997b # 3-30-153                 Is module present?
-	1 11 011110 10011001111111           0 003f997b # 3-30-153-63              Upload disc data
-	1 11 011110 1000010110               0 0001a17b # 3-30-161-1               2× fast forward scan
-	1 11 011110 1001010110               1 0001a97b # 3-30-169-1               2× fast reverse scan
-	1 11 011110 10001101XXXXYYYY         0 0000b17b # 3-30-177-[XXXXYYYY]      Load track and seek to 0:00
-	                    ....                  X     #   XXXX  BCD ones digit
-	                        ....             Y      #   YYYY  BCD tens digit
-	1 11 011110 1001001101XXXXYYYY       1 0002c97b # 3-30-201-2/2-[XXXXYYYY]  Seek to time, seconds part
-	                      ....               XX     #   XXXX  BCD ones digit
-	                          ....          YY      #   YYYY  BCD tens digit
-	1 11 011110 100110110XXXXYYYY0       1 0000d97b # 3-30-217-0/1-[XXXXYYYY]  Load disc
-	                     ....                XX     #   XXXX  BCD ones digit
-	                         ....           YY      #   YYYY  BCD tens digit
-	1 11 011110 10111011XXXXXXXXXX       0 0000dd7b # 3-30-221-[XXXXXXXXXX]    Random mode
-	                    ..........          XXX     #   XXXXXXXXXX  RNG seed (0 if random mode off)
-
-	Command to radio from OnStar
-	1 11 000101 11111110                 1 00007fa3 # 3-40-127  Acknowledge power status
-
-	Commands from radio
-	1 11 100101 11                       1 000003a7 # 3-41-3     Temperature button released
-	1 11 100101 1100000001               0 000203a7 # 3-41-3-2   Temperature down button pressed
-	1 11 100101 1001000001               0 000209a7 # 3-41-9-2   Eject CD changer magazine
-	1 11 100101 1100100001               1 000213a7 # 3-41-19-2  Temperature up button pressed
-
-	Commands from or to radio
-	1 11 001101 11                       1 000003b3 # 3-44-3    From radio: No auxiliary audio selected
-	1 11 001101 11000110                 1 000063b3 # 3-44-99   From radio: CD changer selected
-	1 11 001101 00011110                 1 000078b3 # 3-44-120  OnStar to radio: Disable recurring power status messages (keepalive pings)
-	1 11 001101 00111110                 0 00007cb3 # 3-44-124  OnStar to radio: Enable recurring power status messages (keepalive pings)
-	1 11 001101 11111110                 0 00007fb3 # 3-44-127  To radio: Send one power status message
-	1 11 001101 11000101                 1 0000a3b3 # 3-44-163  From radio: OnStar selected
-	1 11 001101 10000011                 0 0000c1b3 # 3-44-193  From radio: Cassette selected
-
-	Commands from radio to OnStar
-	1 11 110011 00100110                 1 000064cf # 3-51-100  Is module present?
-	1 11 110011 11111110                 1 00007fcf # 3-51-127  SOURCE button was pressed during OnStar session
-
-	Commands from OnStar to radio
-	1 11 001011 0110                     1 000006d3 # 3-52-6     Unmute OnStar audio
-	1 11 001011 0111010010               0 00012ed3 # 3-52-46-1  Call established and underway
-
-	Command from IPM to radio
-	1 11 100111 0111010XX0               0 00002ee7 # 3-57-46/7-[XX]  Load personalization
-	                   ..                     XX    #   XX  memory number 1 or 2
